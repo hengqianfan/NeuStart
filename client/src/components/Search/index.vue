@@ -66,7 +66,7 @@ interface SearchEngine {
     blank?: boolean
 }
 
-const engines: SearchEngine[] = [
+const engines: [SearchEngine, ...SearchEngine[]] = [
     { key: 'bing', label: '必应', icon: 'bing', url: 'https://www.bing.com/search?q=%s', blank: true },
     { key: 'google', label: 'Google', icon: 'google', url: 'https://www.google.com/search?q=%s', blank: true },
     { key: 'bilibili', label: '哔哩哔哩', icon: 'bilibili', url: 'https://search.bilibili.com/all?keyword=%s', blank: true },
@@ -77,7 +77,7 @@ const engines: SearchEngine[] = [
 
 const STORAGE_KEY = 'profile.search.engine'
 
-const activeKey = ref<string>(engines[0].key)
+const activeKey = ref<string>(engines[0]?.key || 'bing')
 const keyword = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 const triggerRef = ref<HTMLButtonElement | null>(null)

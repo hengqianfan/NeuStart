@@ -1,75 +1,18 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import type { Project } from '@/types/project'
+import { projects } from '@/config/projects'
 
 /* ============================================================
    数据结构（写死样例，后期替换即可）
    ============================================================ */
-interface Project {
-    name: string
-    desc: string
-    link: string
-    /** 图标文件名（拼 CDN）或完整 URL */
-    icon?: string
-    tags?: string[]
-    status?: 'active' | 'wip' | 'paused' | 'archived'
-    featured?: boolean
-}
+
 
 const ICON_BASE =
     'https://cdn.jsdelivr.net/gh/hengqianfan/NVP-ImageHost@main/public/images/icons/'
 
 const MAX_TAGS = 3
 
-const projects: Project[] = [
-    {
-        name: '网站导航',
-        desc: '深色玻璃风格的个人导航站，支持分类、标签、搜索与星标置顶。',
-        link: 'https://github.com/hengqianfan',
-        icon: 'xingyun',
-        tags: ['Vue3', 'SCSS', 'TypeScript'],
-        status: 'active',
-    },
-    {
-        name: '组件库',
-        desc: '基于 Vue3 + TS 的轻量组件集合，覆盖表单、弹层、数据展示等常见场景。',
-        link: 'https://github.com/hengqianfan',
-        icon: 'zujian',
-        tags: ['Vue3', 'Vite', '组件'],
-        status: 'wip',
-    },
-    {
-        name: '自动化脚本',
-        desc: '桌面端日常自动化工具集，涵盖剪贴板处理、批量重命名与资源抓取。',
-        link: 'https://github.com/hengqianfan',
-        icon: 'zidong',
-        tags: ['Node', '脚本', '工具'],
-        status: 'paused',
-    },
-    {
-        name: '图片图床',
-        desc: '基于 GitHub + jsDelivr 的免服务器图床方案，配合自动压缩流水线。',
-        link: 'https://github.com/hengqianfan/NVP-ImageHost',
-        icon: 'tuxiang',
-        tags: ['GitHub', 'jsDelivr', 'CDN'],
-        status: 'active',
-    },
-    {
-        name: '笔记归档',
-        desc: '把零散的技术笔记整理成可检索的静态站点，支持全文搜索与标签过滤。',
-        link: 'https://github.com/hengqianfan',
-        icon: 'biji',
-        tags: ['Markdown', 'VitePress'],
-        status: 'archived',
-    },
-    {
-        name: '监控面板',
-        desc: '轻量服务器状态看板，实时展示 CPU、内存、网络与容器运行情况。',
-        link: 'https://github.com/hengqianfan',
-        icon: 'jiance',
-        tags: ['Docker', 'ECharts', 'SSE'],
-        status: 'active',
-    },
-]
 
 /* ============================================================
    状态样式
@@ -78,7 +21,7 @@ const STATUS_MAP: Record<
     NonNullable<Project['status']>,
     { text: string; color: string; dot: string }
 > = {
-    active: { text: '进行中', color: '#57d9a3', dot: '#57d9a3' },
+    active: { text: '运行中', color: '#57d9a3', dot: '#57d9a3' },
     wip: { text: '开发中', color: '#8b9dff', dot: '#8b9dff' },
     paused: { text: '已暂停', color: '#ffcc66', dot: '#ffcc66' },
     archived: { text: '已归档', color: '#8b93a7', dot: '#8b93a7' },
@@ -433,16 +376,20 @@ const sortedProjects = computed(() =>
 .pj-card__icon {
     width: 100%;
     height: 100%;
+    max-height: 100px;
     box-sizing: border-box;
     border-radius: 16px;
     object-fit: contain;
     display: block;
+
+
 }
 
 img.pj-card__icon {
-    padding: 14%;
+    padding: 10%;
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
     transition: filter 0.22s ease;
+
 }
 
 .pj-card:hover img.pj-card__icon {
