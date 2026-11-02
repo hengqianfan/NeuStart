@@ -1,9 +1,13 @@
+import type { st } from "vue-router/dist/index-u4XkZVDG.js"
+
 interface MyConfig {
     author: string
     intro: string
     siteName: string
+    siteIntro?: string
     socials: SocialItem[]
     base: string
+
 }
 
 interface SocialItem {
@@ -18,6 +22,7 @@ export const myConfig: MyConfig = {
     author: '衡千帆',
     intro: '我？非先天性的中度社恐人士，无害型快乐宅男，技术发烧佬，乐于在不同的领域内贡献一些并没有什么毛用的东西。',
     siteName: 'NeuStart',
+    // siteIntro: '衡千帆的个人起始页',
     base: '/NeuStart/',
     socials: [
         { label: 'GitHub', sub: '我的代码仓库', href: 'https://github.com/hengqianfan', icon: 'github' },

@@ -13,4 +13,8 @@ import GFooter from '@/components/GFooter/index.vue'
 import GBg from '@/components/GBg/index.vue'
 </script>
 
-<style lang="scss" scoped></style>
+<style lang="scss" scoped>
+.app-all {
+  background-color: rebeccapurple;
+}
+</style>

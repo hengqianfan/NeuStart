@@ -7,13 +7,26 @@
                 <span>关于本站</span>
             </span>
 
+
+
             <h1 class="about__title">
+
                 NeuStart
+
+                <img src="/icons/neustart.png" alt="" class="logo">
+
+
             </h1>
+
+
 
             <p class="about__desc">
                 这是我的个人起始页站点，建站的原因很简单，我心目中的完美博客感觉还得打磨很长一段时间，所以在此期间，我用 NeuStart 作为过渡，之后，它也将成为我各个创作项目之间互通的空间节点。
+
                 <br />
+
+                <br>
+
                 网站主要导向三大模块：
                 <br />
                 ① <strong>关联我的网络平台账户</strong>，例如 Github 和 哔哩哔哩 等自媒体平台。
@@ -60,6 +73,8 @@
 
 <script lang="ts" setup>
 const timeline = [
+    { date: '2026-11-02', title: '站点部署', text: '项目基本功能已实现，部署到 GitHub Pages' },
+
     { date: '2026-10-30', title: '站点初建', text: '参考原博客项目 Hone 的样式分离重建本站 NeuStart' },
 
 
@@ -69,6 +84,15 @@ const timeline = [
 </script>
 
 <style lang="scss" scoped>
+.logo {
+    width: 50px;
+    height: 50px;
+    background-color: white;
+    border-radius: 50%;
+    // margin: 10px 0;
+    // display: inline-block;
+}
+
 /* ===== 主题变量（黑透） ===== */
 .about {
     --a-text: #e8eefc;
@@ -130,6 +154,9 @@ const timeline = [
     font-weight: 700;
     line-height: 1.3;
     letter-spacing: 0.5px;
+    display: flex;
+    align-items: end;
+    gap: 12px;
 }
 
 .about__hl {

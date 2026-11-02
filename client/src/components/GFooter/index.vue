@@ -13,6 +13,9 @@
                 </template>
             </p>
 
+            <CardTime />
+
+
             <nav class="footer__nav" aria-label="页脚导航">
                 <a v-for="item in navs" :key="item.href" class="footer__link" :href="item.href" target="_blank"
                     rel="noopener noreferrer">{{ item.label }}</a>
@@ -24,6 +27,7 @@
 <script lang="ts" setup>
 import { computed } from 'vue'
 import { myConfig } from '@/config'
+import CardTime from '@/components/CardTime/index.vue'
 
 interface FooterNav {
     label: string
@@ -36,18 +40,19 @@ interface Props {
     icp?: string
     version?: string
     navs?: FooterNav[]
+
 }
 
 const props = withDefaults(defineProps<Props>(), {
     author: 'My Profile',
     homeUrl: '/',
-    icp: '111',
+    icp: '',
     version: 'v1.0.0',
     navs: () => [
         { label: 'GitHub', href: 'https://github.com/' },
-        { label: '博客', href: 'https://example.com/' },
-        { label: '友链', href: '/links' },
-        { label: 'RSS', href: '/feed.xml' },
+        // { label: '博客', href: 'https://example.com/' },
+        // { label: '友链', href: '/sites' },
+        // { label: 'RSS', href: '/feed.xml' },
     ],
 })
 

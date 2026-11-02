@@ -1,7 +1,9 @@
 <template>
     <main class="profile">
+
         <!-- 翻转舞台 -->
         <div class="stage" :class="{ 'is-flipped': flipped }">
+
             <div class="flipper">
                 <!-- ===== 正面：个人介绍 ===== -->
                 <section class="card card--front" role="region" aria-label="个人介绍"
@@ -39,7 +41,7 @@
                 <!-- ===== 背面：社交链接卡片 ===== -->
                 <section class="card card--back" role="region" aria-label="社交链接"
                     :aria-hidden="flipped ? 'false' : 'true'">
-                    <h2 class="social__title">找到我</h2>
+                    <h2 class="social__title">我的世界</h2>
 
                     <ul class="social__list">
                         <li v-for="item in myConfig.socials" :key="item.href" class="social__item">
@@ -66,6 +68,7 @@
             </div>
         </div>
     </main>
+
 </template>
 
 <script lang="ts" setup>
@@ -125,8 +128,10 @@ function toggleFlip() {
     position: relative;
     z-index: 1;
     width: 100%;
-    max-width: 520px;
+    max-width: 620px;
     perspective: 1600px;
+
+
     animation: rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
@@ -148,6 +153,7 @@ function toggleFlip() {
     transform-style: preserve-3d;
     transition: transform var(--flip-duration) cubic-bezier(0.22, 1, 0.36, 1);
     will-change: transform;
+
 }
 
 .stage.is-flipped .flipper {
@@ -387,7 +393,7 @@ function toggleFlip() {
 /* ===== 搜索容器 ===== */
 .card__search {
     width: 80%;
-    margin: 10px auto 20px;
+    margin: 10px auto 50px;
 }
 
 /* ===== 标签 ===== */
@@ -422,7 +428,7 @@ function toggleFlip() {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin: 0 0 16px;
+    margin: 0 0 30px;
     font-size: 13px;
     font-weight: 600;
     letter-spacing: 2px;
