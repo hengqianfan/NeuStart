@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { CATEGORIES, type CategoryId, type Site } from '@/types/site';
 // import { sites } from '@/config/sites';
 import rawSites from '@/config/sites.json';
@@ -36,6 +36,7 @@ const tagsOpen = ref(false);
 const activeTags = ref<string[]>([]);
 
 const searchInput = ref<HTMLInputElement | null>(null);
+const searchbarRef = ref<HTMLElement | null>(null);
 
 /* ============ ② 搜索防抖 ============ */
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -50,6 +51,33 @@ const openSearch = () => {
     tagsOpen.value = true;
     searchInput.value?.focus();
 };
+
+/* ============ ②·1 悬浮面板的开合控制 ============ */
+
+/** 点击面板 / 搜索框之外的区域时收起 */
+function onDocPointerDown(e: PointerEvent) {
+    if (!tagsOpen.value) return;
+    const el = searchbarRef.value;
+    if (el && e.target instanceof Node && el.contains(e.target)) return;
+    tagsOpen.value = false;
+}
+
+/** Esc 收起 */
+function onDocKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && tagsOpen.value) {
+        tagsOpen.value = false;
+    }
+}
+
+onMounted(() => {
+    document.addEventListener('pointerdown', onDocPointerDown, true);
+    document.addEventListener('keydown', onDocKeydown);
+});
+
+onBeforeUnmount(() => {
+    document.removeEventListener('pointerdown', onDocPointerDown, true);
+    document.removeEventListener('keydown', onDocKeydown);
+});
 
 /* ============ ③ 标签池 ============ */
 const allTags = computed(() => {
@@ -189,6 +217,31 @@ const visibleGroups = computed<NavGroup[]>(() => {
 const isPinGroup = (group: NavGroup) => group.id === PIN_ID;
 const isAllId = (id: NavId) => id === ALL_ID;
 
+/* ============ ⑥·1 搜索结果高亮 ============ */
+
+/** 是否处于「全部 + 有筛选」的搜索结果视图 */
+const isSearchView = computed(
+    () => activeId.value === ALL_ID && hasFilter.value,
+);
+
+/** 某分类是否有命中结果 */
+const catHit = (id: CategoryId) => isSearchView.value && countOf(id) > 0;
+/** 某分类是否无命中（变暗） */
+const catZero = (id: CategoryId) => isSearchView.value && countOf(id) === 0;
+
+/** 当前可见分组内，各二级类型的命中数 */
+const kindCountMap = computed(() => {
+    const map = new Map<string, number>();
+    visibleGroups.value.forEach((g) =>
+        g.subGroups.forEach((sub) => {
+            map.set(sub.kind, (map.get(sub.kind) ?? 0) + sub.items.length);
+        }),
+    );
+    return map;
+});
+
+const kindHit = (kind: string) => isSearchView.value && (kindCountMap.value.get(kind) ?? 0) > 0;
+
 const kindOptions = computed(() => {
     const set = new Set<string>();
     visibleGroups.value.forEach((g) =>
@@ -208,27 +261,38 @@ watch(
     { flush: 'sync' },
 );
 
-/* 切换一级分类时强制归位二级选中（双保险） */
+/* 切换一级分类时强制归位二级选中 */
 watch(activeId, () => {
     activeKind.value = ALL_ID;
 });
+
+/* 关键：一旦开始搜索 / 加标签，自动切到「全部」分类 */
+watch(
+    [debouncedKeyword, () => activeTags.value.length],
+    ([kw, tagLen]) => {
+        if (!kw && tagLen === 0) return;
+        if (activeId.value !== ALL_ID) {
+            activeId.value = ALL_ID;
+            activeKind.value = ALL_ID;
+            // 等 DOM 更新后回到顶部，让命中的分类从第一屏开始展示
+            requestAnimationFrame(() => scrollTo('nav-top'));
+        }
+    },
+    { flush: 'sync' },
+);
 
 const renderedGroups = computed<NavGroup[]>(() =>
     visibleGroups.value
         .map((g) => ({
             ...g,
-            // 只有真正命中当前 kind 的小节才保留，避免“分组标题在、内容空”的残留
             subGroups:
                 activeKind.value === ALL_ID
                     ? g.subGroups
                     : g.subGroups.filter((sub) => sub.kind === activeKind.value),
         }))
         .filter((g) => {
-            // 星标分组没有 subGroups，按 items 判断
             if (g.id === PIN_ID) return g.items.length > 0;
-            // 选了具体 kind：必须有对应小节才渲染该分组
             if (activeKind.value !== ALL_ID) return g.subGroups.length > 0;
-            // 选了“全部类型”：有任意小节或任意 item 才渲染
             return g.subGroups.length > 0 || g.items.length > 0;
         }),
 );
@@ -273,16 +337,26 @@ const pickKind = (kind: string) => {
 <template>
     <div class="np">
         <SiteEditor v-model="editor" />
-        <button class="tool" @click="editor = true">
-            <i class="iconfont icon-edit" /> 数据编辑
-        </button>
+
         <header class="np-header">
             <div class="np-brand">
                 <span class="np-brand__dot" aria-hidden="true" />
                 <h1 class="np-title">网站导航</h1>
+
+                <!-- 编辑入口：贴在标题右侧 -->
+                <button class="np-edit" type="button" title="打开数据编辑器" aria-label="数据编辑" @click="editor = true">
+                    <svg class="np-edit__icon" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        aria-hidden="true">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                    </svg>
+                    <span class="np-edit__text">管理站点</span>
+                </button>
             </div>
 
-            <div class="np-searchbar">
+            <!-- 悬浮面板的定位参照物 -->
+            <div ref="searchbarRef" class="np-searchbar">
                 <div class="np-search">
                     <svg class="np-search__icon" viewBox="0 0 24 24" width="16" height="16" fill="none"
                         stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -290,7 +364,8 @@ const pickKind = (kind: string) => {
                         <path d="m20 20-3.5-3.5" stroke-linecap="round" />
                     </svg>
                     <input ref="searchInput" v-model="keyword" class="np-search__input" type="search"
-                        aria-label="搜索站点名称、标签或类型" placeholder="搜索站点名称、标签或类型…" @focus="tagsOpen = true" />
+                        aria-label="搜索站点名称、标签或类型" placeholder="搜索站点名称、标签或类型…" :aria-expanded="tagsOpen"
+                        aria-controls="np-panel" @focus="tagsOpen = true" />
                     <button v-if="keyword" class="np-search__clear" type="button" aria-label="清空搜索"
                         @click="keyword = ''">
                         ✕
@@ -305,38 +380,39 @@ const pickKind = (kind: string) => {
                 <button v-if="hasFilter" class="np-btn np-btn--ghost" type="button" @click="resetAll">
                     重置
                 </button>
+
+                <!-- 标签组菜单：悬浮在搜索框下方，不占文档流 -->
+                <transition name="np-drop">
+                    <div v-show="tagsOpen" id="np-panel" class="np-panel" role="dialog" aria-label="标签筛选">
+                        <div class="np-tags__head">
+                            <span class="np-tags__title">标签</span>
+                            <span class="np-tags__total">共 {{ tagTotalCount }} 个</span>
+                            <button class="np-tags__close" type="button" aria-label="收起标签" @click="tagsOpen = false">
+                                ✕
+                            </button>
+                        </div>
+
+                        <div class="np-tags">
+                            <button class="np-chip" type="button" :aria-pressed="!activeTags.length"
+                                :class="{ 'is-on': !activeTags.length }" @click="clearTags()">
+                                全部标签
+                                <span class="np-chip__count">{{ sites.length }}</span>
+                            </button>
+                            <button v-for="item in allTags" :key="item.tag" class="np-chip" type="button"
+                                :aria-pressed="activeTags.includes(item.tag)"
+                                :class="{ 'is-on': activeTags.includes(item.tag) }" @click="toggleTag(item.tag)">
+                                {{ item.tag }}
+                                <span class="np-chip__count">{{ item.count }}</span>
+                            </button>
+                            <p v-if="!allTags.length" class="np-tags__empty">没有匹配的标签</p>
+                        </div>
+                    </div>
+                </transition>
             </div>
         </header>
 
-        <transition name="np-drop">
-            <div v-show="tagsOpen" id="np-panel" class="np-panel">
-                <div class="np-tags__head">
-                    <span class="np-tags__title">标签</span>
-                    <span class="np-tags__total">共 {{ tagTotalCount }} 个</span>
-                    <button class="np-tags__close" type="button" aria-label="收起标签" @click="tagsOpen = false">
-                        ✕
-                    </button>
-                </div>
-
-                <div class="np-tags">
-                    <button class="np-chip" type="button" :aria-pressed="!activeTags.length"
-                        :class="{ 'is-on': !activeTags.length }" @click="clearTags()">
-                        全部标签
-                        <span class="np-chip__count">{{ sites.length }}</span>
-                    </button>
-                    <button v-for="item in allTags" :key="item.tag" class="np-chip" type="button"
-                        :aria-pressed="activeTags.includes(item.tag)"
-                        :class="{ 'is-on': activeTags.includes(item.tag) }" @click="toggleTag(item.tag)">
-                        {{ item.tag }}
-                        <span class="np-chip__count">{{ item.count }}</span>
-                    </button>
-                </div>
-            </div>
-        </transition>
-
         <div class="np-body">
             <aside class="np-side" aria-label="一级分类">
-                <!-- ① 星标置顶：放在「全部」之上 -->
                 <button v-if="pinCount" class="np-cat np-cat--pin" type="button" :aria-pressed="activeId === PIN_ID"
                     :class="{ 'is-on': activeId === PIN_ID }" @click="pickCategory(PIN_ID)">
                     <span class="np-cat__name">
@@ -353,7 +429,8 @@ const pickKind = (kind: string) => {
                 </button>
 
                 <button v-for="cat in CATEGORIES" :key="cat.id" class="np-cat" type="button"
-                    :aria-pressed="activeId === cat.id" :class="{ 'is-on': activeId === cat.id }"
+                    :aria-pressed="activeId === cat.id"
+                    :class="{ 'is-on': activeId === cat.id, 'is-hit': catHit(cat.id), 'is-zero': catZero(cat.id) }"
                     @click="pickCategory(cat.id)">
                     <span class="np-cat__name">{{ cat.name }}</span>
                     <span class="np-cat__count">{{ countOf(cat.id) }}</span>
@@ -363,14 +440,20 @@ const pickKind = (kind: string) => {
             <main ref="scrollContainer" class="np-main">
                 <div id="nav-top" class="np-anchor" aria-hidden="true" />
 
+                <!-- 搜索结果摘要 -->
+                <p v-if="isSearchView" class="np-hit-tip">
+                    找到 <strong>{{ filtered.length }}</strong> 个站点，分布在
+                    <strong>{{[...countMap.values()].filter((n) => n > 0).length}}</strong> 个分类中
+                </p>
+
                 <div v-if="kindOptions.length > 1" class="np-kinds" role="tablist" aria-label="二级类型">
                     <button class="np-kind" type="button" role="tab" :aria-selected="activeKind === 'all'"
                         :class="{ 'is-on': activeKind === 'all' }" @click="pickKind('all')">
                         全部类型
                     </button>
                     <button v-for="kind in kindOptions" :key="kind" class="np-kind" type="button" role="tab"
-                        :aria-selected="activeKind === kind" :class="{ 'is-on': activeKind === kind }"
-                        @click="pickKind(kind)">
+                        :aria-selected="activeKind === kind"
+                        :class="{ 'is-on': activeKind === kind, 'is-hit': kindHit(kind) }" @click="pickKind(kind)">
                         {{ kind }}
                     </button>
                 </div>
@@ -418,7 +501,7 @@ const pickKind = (kind: string) => {
 
 <style lang="scss" scoped>
 /* ==================================================================
-   黑色玻璃主题（全部写死色值，无 CSS 变量依赖）
+   黑色玻璃主题
    ================================================================== */
 .np {
     position: relative;
@@ -460,7 +543,6 @@ const pickKind = (kind: string) => {
     color: #9a9aa2;
     background: rgba(28, 28, 32, 0.45);
     border-color: rgba(255, 255, 255, 0.10);
-
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
@@ -488,18 +570,6 @@ const pickKind = (kind: string) => {
     border-color: #7676f5;
 }
 
-.np-badge {
-    min-width: 17px;
-    height: 17px;
-    padding: 0 5px;
-    font-size: 11px;
-    line-height: 17px;
-    text-align: center;
-    color: #ffffff;
-    background: #8b8bff;
-    border-radius: 999px;
-}
-
 .np-header {
     flex: none;
     display: flex;
@@ -515,7 +585,6 @@ const pickKind = (kind: string) => {
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     background: rgba(18, 18, 20, 0.72);
-
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
 }
 
@@ -524,9 +593,11 @@ const pickKind = (kind: string) => {
     align-items: center;
     gap: 10px;
     flex: none;
+    min-width: 0;
 }
 
 .np-brand__dot {
+    flex: none;
     width: 9px;
     height: 9px;
     border-radius: 50%;
@@ -543,7 +614,59 @@ const pickKind = (kind: string) => {
     white-space: nowrap;
 }
 
+/* ============ 编辑入口（标题右侧） ============ */
+.np-edit {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 26px;
+    margin-left: 4px;
+    padding: 0 10px 0 9px;
+    font-size: 12px;
+    font-family: inherit;
+    font-weight: 500;
+    line-height: 1;
+    color: #9a9aa2;
+    background: rgba(28, 28, 32, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 999px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.18s ease, background 0.18s ease,
+        border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.np-edit__icon {
+    flex: none;
+    color: currentColor;
+    transition: transform 0.18s ease;
+}
+
+.np-edit:hover {
+    color: #c8c8ff;
+    background: rgba(139, 139, 255, 0.14);
+    border-color: rgba(139, 139, 255, 0.42);
+    box-shadow: 0 0 0 3px rgba(139, 139, 255, 0.10);
+}
+
+.np-edit:hover .np-edit__icon {
+    transform: rotate(-8deg) scale(1.06);
+}
+
+.np-edit:active {
+    transform: translateY(1px);
+}
+
+.np-edit:focus-visible {
+    outline: none;
+    color: #c8c8ff;
+    border-color: rgba(139, 139, 255, 0.55);
+    box-shadow: 0 0 0 3px rgba(139, 139, 255, 0.22);
+}
+
 .np-searchbar {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -613,22 +736,60 @@ const pickKind = (kind: string) => {
     flex: none;
 }
 
+/* ============ 悬浮标签面板 ============ */
 .np-panel {
-    flex: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 50;
+
     display: grid;
     gap: 10px;
-    max-width: 1680px;
-    width: 100%;
-    margin: 0 auto;
-    padding: 12px 16px;
-    box-sizing: border-box;
-    border-left: 1px solid rgba(255, 255, 255, 0.10);
-    border-right: 1px solid rgba(255, 255, 255, 0.10);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    background: rgba(18, 18, 20, 0.55);
-
-    max-height: 40%;
+    width: min(560px, 100%);
+    max-height: min(52vh, 420px);
     overflow-y: auto;
+    padding: 12px 14px;
+    box-sizing: border-box;
+
+    background: rgba(20, 20, 24, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    box-shadow:
+        0 24px 60px -18px rgba(0, 0, 0, 0.9),
+        0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+
+    backdrop-filter: blur(14px) saturate(130%);
+    -webkit-backdrop-filter: blur(14px) saturate(130%);
+
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.np-panel::-webkit-scrollbar {
+    width: 8px;
+}
+
+.np-panel::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+}
+
+.np-panel::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.np-panel::before {
+    content: '';
+    position: absolute;
+    top: -5px;
+    right: 26px;
+    width: 9px;
+    height: 9px;
+    background: rgba(20, 20, 24, 0.96);
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    transform: rotate(45deg);
 }
 
 .np-tags__head {
@@ -670,6 +831,12 @@ const pickKind = (kind: string) => {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+}
+
+.np-tags__empty {
+    margin: 6px 2px 2px;
+    font-size: 12.5px;
+    color: #6b6b74;
 }
 
 .np-chip {
@@ -725,13 +892,13 @@ const pickKind = (kind: string) => {
 
 .np-drop-enter-active,
 .np-drop-leave-active {
-    transition: opacity 0.2s ease, transform 0.2s ease;
+    transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
 .np-drop-enter-from,
 .np-drop-leave-to {
     opacity: 0;
-    transform: translateY(-6px);
+    transform: translateY(-8px) scale(0.98);
 }
 
 .np-body {
@@ -751,7 +918,6 @@ const pickKind = (kind: string) => {
     border-bottom: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 0 0 18px 18px;
     background: rgba(18, 18, 20, 0.55);
-
     box-shadow: 0 12px 40px -16px rgba(0, 0, 0, 0.75),
         inset 0 1px 0 rgba(255, 255, 255, 0.10);
 }
@@ -780,11 +946,12 @@ const pickKind = (kind: string) => {
     font-family: inherit;
     color: #9a9aa2;
     background: transparent;
-    border: none;
+    border: 1px solid transparent;
     border-radius: 8px;
     cursor: pointer;
     text-align: left;
-    transition: color 0.18s ease, background 0.18s ease;
+    transition: color 0.18s ease, background 0.18s ease,
+        border-color 0.18s ease, opacity 0.18s ease;
 }
 
 .np-cat::before {
@@ -815,6 +982,35 @@ const pickKind = (kind: string) => {
     height: 18px;
 }
 
+.np-cat.is-hit:not(.is-on) {
+    color: #e8e8ea;
+    font-weight: 600;
+    background: rgba(139, 139, 255, 0.08);
+    border-color: rgba(139, 139, 255, 0.32);
+}
+
+.np-cat.is-hit:not(.is-on)::before {
+    height: 12px;
+}
+
+.np-cat.is-hit:not(.is-on) .np-cat__count {
+    color: #8b8bff;
+    background: rgba(139, 139, 255, 0.16);
+}
+
+.np-cat.is-hit:hover {
+    background: rgba(139, 139, 255, 0.16);
+    border-color: rgba(139, 139, 255, 0.5);
+}
+
+.np-cat.is-zero {
+    opacity: 0.38;
+}
+
+.np-cat.is-zero:hover {
+    opacity: 0.7;
+}
+
 .np-cat__name {
     display: inline-flex;
     align-items: center;
@@ -826,10 +1022,18 @@ const pickKind = (kind: string) => {
 }
 
 .np-cat__count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 6px;
     font-size: 11.5px;
     font-weight: 400;
     color: #6b6b74;
+    border-radius: 999px;
     font-variant-numeric: tabular-nums;
+    transition: color 0.18s ease, background 0.18s ease;
 }
 
 .np-cat.is-on .np-cat__count {
@@ -887,6 +1091,23 @@ const pickKind = (kind: string) => {
     overflow: hidden;
 }
 
+.np-hit-tip {
+    margin: 0 0 18px;
+    padding: 8px 14px;
+    display: inline-block;
+    font-size: 12.5px;
+    color: #9a9aa2;
+    background: rgba(139, 139, 255, 0.08);
+    border: 1px solid rgba(139, 139, 255, 0.28);
+    border-radius: 999px;
+}
+
+.np-hit-tip strong {
+    color: #8b8bff;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+
 .np-kinds {
     display: inline-flex;
     flex-wrap: wrap;
@@ -907,7 +1128,8 @@ const pickKind = (kind: string) => {
     border: none;
     border-radius: 8px;
     cursor: pointer;
-    transition: color 0.18s ease, background 0.18s ease;
+    transition: color 0.18s ease, background 0.18s ease,
+        box-shadow 0.18s ease;
 }
 
 .np-kind:hover {
@@ -920,6 +1142,13 @@ const pickKind = (kind: string) => {
     background: #8b8bff;
     box-shadow: 0 2px 10px -2px rgba(139, 139, 255, 0.35);
     font-weight: 600;
+}
+
+.np-kind.is-hit:not(.is-on) {
+    color: #8b8bff;
+    font-weight: 600;
+    background: rgba(139, 139, 255, 0.14);
+    box-shadow: inset 0 0 0 1px rgba(139, 139, 255, 0.35);
 }
 
 .np-section {
@@ -1075,6 +1304,17 @@ const pickKind = (kind: string) => {
         padding: 12px 16px;
     }
 
+    /* 窄屏只留图标，节省头部空间 */
+    .np-edit {
+        width: 26px;
+        padding: 0;
+        justify-content: center;
+    }
+
+    .np-edit__text {
+        display: none;
+    }
+
     .np-searchbar {
         order: 3;
         flex: 1 1 100%;
@@ -1086,10 +1326,15 @@ const pickKind = (kind: string) => {
     }
 
     .np-panel {
-        border-left: none;
-        border-right: none;
-        padding-left: 16px;
-        padding-right: 16px;
+        left: 0;
+        right: 0;
+        width: auto;
+        max-height: 46vh;
+    }
+
+    .np-panel::before {
+        right: auto;
+        left: 28px;
     }
 
     .np-body {
@@ -1133,6 +1378,10 @@ const pickKind = (kind: string) => {
         border: 1px solid rgba(139, 139, 255, 0.45);
     }
 
+    .np-cat.is-hit:not(.is-on) {
+        border: 1px solid rgba(139, 139, 255, 0.32);
+    }
+
     .np-cat--pin.is-on {
         border-color: rgba(255, 209, 102, 0.45);
     }
@@ -1152,7 +1401,9 @@ const pickKind = (kind: string) => {
     .np-header,
     .np-panel,
     .np-side,
-    .np-kinds {
+    .np-kinds,
+    .np-hit-tip,
+    .np-edit {
         display: none;
     }
 

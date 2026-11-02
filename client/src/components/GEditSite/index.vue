@@ -33,11 +33,17 @@
                                     <button class="se-btn se-btn--sm" @click="addSite">新增</button>
                                 </div>
                                 <ul class="se-list__ul">
-                                    <li v-for="(s, i) in filtered" :key="s.link + '#' + i" class="se-list__li"
-                                        :class="{ 'is-active': i === activeIdx }" @click="activeIdx = i">
-                                        <span class="se-list__name">{{ s.name }}</span>
+                                    <li v-for="(s, i) in filtered" :key="i" class="se-list__li" :class="{
+                                        'is-active': i === activeIdx,
+                                        'is-draft': isDraft(s),
+                                        'is-dimmed': hasDraft && !isDraft(s),
+                                    }" @click="activeIdx = i">
+                                        <span class="se-list__name">
+                                            {{ s.name }}
+                                            <em v-if="isDraft(s)" class="se-list__badge">待填写</em>
+                                        </span>
                                         <span class="se-list__kind">{{ s.categoryId }} · {{ s.kind }}</span>
-                                        <button class="se-del" title="删除" @click.stop="remove(i)">×</button>
+                                        <button class="se-del" title="删除" @click.stop="askRemove(i)">×</button>
                                     </li>
                                     <li v-if="!filtered.length" class="se-empty">无匹配项</li>
                                 </ul>
@@ -73,16 +79,25 @@
                                         class="se-input" /></label>
                                 <label class="se-f se-f--full"><span>描述</span><textarea v-model="current.desc"
                                         class="se-input" rows="2" /></label>
+
+                                <!-- 标签：输入空格 / 中英文逗号 / 顿号 / 分号 自动分隔 -->
                                 <label class="se-f se-f--full">
-                                    <span>标签（逗号分隔）</span>
-                                    <input :value="(current.tags || []).join(',')" class="se-input"
-                                        @input="onTagsInput" />
+                                    <span>标签（输入空格、逗号或回车自动分隔）</span>
+                                    <input ref="tagInput" :value="tagText" class="se-input"
+                                        placeholder="例如：React Vue 前端" @input="onTagsInput" @keydown="onTagsKeydown"
+                                        @blur="flushTagsText" />
                                 </label>
+
                                 <label class="se-f">
                                     <span>置顶权重</span>
                                     <input :value="current.pin ?? ''" type="number" class="se-input"
                                         @input="current.pin = Number(($event.target as HTMLInputElement).value) || undefined" />
                                 </label>
+
+                                <!-- 草稿未填写提示 -->
+                                <p v-if="isDraft(current)" class="se-draft-tip">
+                                    这是未填写的新增条目，填写名称与链接后才会被保存；取消选中将自动丢弃。
+                                </p>
                             </section>
                         </div>
 
@@ -98,6 +113,24 @@
                         <p v-if="msg" class="se-msg" :class="msgType">{{ msg }}</p>
                     </template>
                 </div>
+
+                <!-- 删除确认（面板保持中性，仅提示文本与确认按钮为红色） -->
+                <Transition name="se-fade">
+                    <div v-if="pendingRemoveSite" class="se-confirm" @click.self="cancelRemove">
+                        <div class="se-confirm__box" role="alertdialog" aria-modal="true">
+                            <p class="se-confirm__t">
+                                <i class="iconfont icon-warning" /><span>确认删除？</span>
+                            </p>
+                            <p class="se-confirm__d">
+                                「{{ pendingRemoveSite.name || '未命名' }}」将被移除，保存后不可恢复。
+                            </p>
+                            <div class="se-confirm__ops">
+                                <button class="se-btn se-btn--ghost" @click="cancelRemove">取消</button>
+                                <button class="se-btn se-btn--danger" @click="confirmRemove">删除</button>
+                            </div>
+                        </div>
+                    </div>
+                </Transition>
             </div>
         </Transition>
     </Teleport>
@@ -125,7 +158,19 @@ const visible = computed({
     set: (v) => emit('update:modelValue', v),
 })
 
-/** 当前分类下可选的二级分类 */
+/* ============ 新增草稿判定 ============ */
+
+const DRAFT_NAME = '新站点'
+const DRAFT_LINK = 'https://'
+
+/** 名称与链接都还是默认值 → 视为草稿，不计入保存 / 导出 / 校验 */
+function isDraft(s?: Site): boolean {
+    if (!s) return false
+    return s.name.trim() === DRAFT_NAME && (s.link || '').trim() === DRAFT_LINK
+}
+
+const hasDraft = computed(() => filtered.value.some((s) => isDraft(s)))
+
 const kindOptions = computed<readonly string[]>(() => {
     const cid = current.value?.categoryId
     return cid ? KINDS[cid] : []
@@ -144,33 +189,196 @@ const current = computed<Site | undefined>(() => filtered.value[activeIdx.value]
 const envLabel = isDev ? 'DEV · 可写入' : 'PROD · 只读'
 const envClass = isDev ? 'is-dev' : 'is-prod'
 
+/* ============ 选中下标收敛 ============ */
+
+/** 列表长度变化后，保证 activeIdx 合法 */
+function clampActive() {
+    const max = filtered.value.length - 1
+    if (max < 0) {
+        activeIdx.value = 0
+    } else if (activeIdx.value > max) {
+        activeIdx.value = max
+    } else if (activeIdx.value < 0) {
+        activeIdx.value = 0
+    }
+}
+
+/* ============ 标签输入处理 ============ */
+
+const tagText = ref('')
+const tagInput = ref<HTMLInputElement | null>(null)
+
+const TAG_SEP = /[,，、;；\s]+/
+
+function splitTags(val: string): string[] {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const raw of val.split(TAG_SEP)) {
+        const t = raw.trim()
+        if (!t || seen.has(t)) continue
+        seen.add(t)
+        out.push(t)
+    }
+    return out
+}
+
+function joinTags(tags?: string[]): string {
+    return (tags ?? []).join(', ')
+}
+
+watch(
+    current,
+    (s) => {
+        tagText.value = joinTags(s?.tags)
+    },
+    { immediate: true },
+)
+
+function normalizeTagText(val: string): string {
+    const endedWithSep = /[,，、;；\s]$/.test(val)
+    const tags = splitTags(val)
+    const base = tags.join(', ')
+    if (!base) return ''
+    return endedWithSep ? `${base}, ` : base
+}
+
+function onTagsInput(e: Event) {
+    const el = e.target as HTMLInputElement
+    const s = current.value
+    if (!s) return
+
+    const normalized = normalizeTagText(el.value)
+    tagText.value = normalized
+    if (el.value !== normalized) {
+        el.value = normalized
+        const pos = normalized.length
+        requestAnimationFrame(() => el.setSelectionRange(pos, pos))
+    }
+    s.tags = splitTags(normalized)
+}
+
+function onTagsKeydown(e: KeyboardEvent) {
+    const el = e.target as HTMLInputElement
+    const s = current.value
+    if (!s) return
+
+    if (e.key === 'Enter') {
+        e.preventDefault()
+        flushTagsText()
+        return
+    }
+
+    if (e.key === ' ') {
+        const caret = el.selectionStart ?? el.value.length
+        const before = el.value.slice(0, caret)
+        if (!before.trim()) {
+            e.preventDefault()
+            return
+        }
+        if (/[,\uFF0C、;；\s]$/.test(before)) {
+            e.preventDefault()
+            return
+        }
+        e.preventDefault()
+        const next = `${el.value.slice(0, caret).replace(/[,\uFF0C、;；\s]+$/, '')}, ${el.value.slice(caret).replace(/^[,\uFF0C、;；\s]+/, '')}`
+        const normalized = normalizeTagText(next)
+        tagText.value = normalized
+        el.value = normalized
+        const pos = normalized.length
+        requestAnimationFrame(() => el.setSelectionRange(pos, pos))
+        s.tags = splitTags(normalized)
+    }
+}
+
+function flushTagsText() {
+    const s = current.value
+    if (!s) return
+    const normalized = splitTags(tagText.value).join(', ')
+    tagText.value = normalized
+    if (tagInput.value) tagInput.value.value = normalized
+    s.tags = splitTags(normalized)
+}
+
+/* ============ 其他操作 ============ */
+
 function close() {
+    discardDrafts()
     visible.value = false
 }
 
 function addSite() {
+    discardDrafts()
     list.value.unshift({
-        name: '新站点',
+        name: DRAFT_NAME,
         categoryId: '001' as CategoryId,
         kind: KINDS['001'][0],
         desc: '',
         tags: [],
-        link: 'https://',
+        link: DRAFT_LINK,
     })
+    q.value = ''
     activeIdx.value = 0
+    tagText.value = ''
+    msg.value = ''
 }
 
-function remove(i: number) {
+function discardDrafts() {
+    for (let i = list.value.length - 1; i >= 0; i--) {
+        const s = list.value[i]
+        if (s && isDraft(s)) list.value.splice(i, 1)
+    }
+    clampActive()
+}
+
+/* ---------- 删除确认 ---------- */
+
+const pendingRemoveSite = ref<Site | null>(null)
+
+function askRemove(i: number) {
     const target = filtered.value[i]
     if (!target) return
-    const real = list.value.indexOf(target)
-    if (real > -1) list.value.splice(real, 1)
-    if (activeIdx.value >= filtered.value.length) {
-        activeIdx.value = Math.max(0, filtered.value.length - 1)
+    if (isDraft(target)) {
+        // 空草稿无需确认，直接丢弃
+        doRemove(target)
+        return
     }
+    pendingRemoveSite.value = target
 }
 
-/** 切换一级分类时，若原 kind 不属于新分类，自动落到第一个合法值 */
+function cancelRemove() {
+    pendingRemoveSite.value = null
+}
+
+function confirmRemove() {
+    const target = pendingRemoveSite.value
+    pendingRemoveSite.value = null
+    if (target) doRemove(target)
+}
+
+/**
+ * 删除指定条目：
+ * 1. 先记录它在列表(filtered)中的位置；
+ * 2. 从源数组中移除；
+ * 3. 若删除的是当前选中项，把选中项落到「原位置」或前一条，避免列表第一条删不掉 / 选中错位。
+ */
+function doRemove(target: Site) {
+    const posInFiltered = filtered.value.indexOf(target)
+    const realIdx = list.value.indexOf(target)
+    if (realIdx > -1) list.value.splice(realIdx, 1)
+
+    if (posInFiltered > -1 && posInFiltered === activeIdx.value) {
+        // 选中项被删：优先选中同一位置（原下一条），否则退回前一条
+        activeIdx.value = Math.max(0, Math.min(posInFiltered, filtered.value.length - 1))
+    }
+    // 非选中项被删，但删除位置在选中项之前时，选中项自动上移一位
+    else if (posInFiltered > -1 && posInFiltered < activeIdx.value) {
+        activeIdx.value -= 1
+    }
+    clampActive()
+    // 同步标签文本
+    tagText.value = joinTags(current.value?.tags)
+}
+
 function onCategoryChange() {
     const s = current.value
     if (!s) return
@@ -180,18 +388,11 @@ function onCategoryChange() {
     }
 }
 
-function onTagsInput(e: Event) {
-    const s = current.value
-    if (!s) return
-    const val = (e.target as HTMLInputElement).value
-    s.tags = val.split(',').map((t) => t.trim()).filter(Boolean)
-}
-
-/** 表单校验，返回错误信息或 null */
 function validate(): string | null {
     for (let i = 0; i < list.value.length; i++) {
         const s = list.value[i]
-        if (!s) continue                       // ★ 修复 TS 可能未定义
+        if (!s) continue
+        if (isDraft(s)) continue
         const at = `第 ${i + 1} 条（${s.name || '未命名'}）`
         if (!s.name.trim()) return `${at}：名称不能为空`
         if (!s.categoryId) return `${at}：请选择分类`
@@ -206,7 +407,9 @@ function validate(): string | null {
 }
 
 function snapshot() {
-    return JSON.stringify(list.value, null, 2)
+    flushTagsText()
+    const data = list.value.filter((s) => !isDraft(s))
+    return JSON.stringify(data, null, 2)
 }
 
 function exportJson() {
@@ -230,6 +433,7 @@ async function save() {
         msgType.value = 'err'
         return
     }
+    flushTagsText()
     const err = validate()
     if (err) {
         msg.value = err
@@ -257,11 +461,19 @@ async function save() {
 }
 
 watch(visible, (v) => {
-    if (v) msg.value = ''
+    if (v) {
+        msg.value = ''
+    } else {
+        pendingRemoveSite.value = null
+    }
 })
+
+// 搜索词变化后，选中下标可能越界
+watch(filtered, () => clampActive())
 </script>
 
 <style lang="scss" scoped>
+/* ================= 遮罩 ================= */
 .se-mask {
     position: fixed;
     inset: 0;
@@ -269,41 +481,56 @@ watch(visible, (v) => {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, .62);
-    backdrop-filter: blur(6px);
+    padding: 24px;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, .66);
+    backdrop-filter: blur(8px) saturate(120%);
 }
 
+/* ================= 面板 ================= */
 .se-panel {
-    width: min(860px, 92vw);
-    max-height: 84vh;
+    position: relative;
+    width: min(1180px, 94vw);
+    height: min(760px, 88vh);
     display: flex;
     flex-direction: column;
-    background: rgba(16, 16, 18, .97);
-    border: 1px solid rgba(255, 255, 255, .16);
-    border-radius: 14px;
-    box-shadow: 0 24px 60px rgba(0, 0, 0, .7);
+    background: linear-gradient(180deg, rgba(24, 24, 27, .98), rgba(14, 14, 16, .99));
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 18px;
+    box-shadow:
+        0 32px 80px -20px rgba(0, 0, 0, .85),
+        0 0 0 1px rgba(255, 255, 255, .04) inset,
+        0 1px 0 rgba(255, 255, 255, .08) inset;
     color: rgba(255, 255, 255, .9);
     overflow: hidden;
+    font-size: 13px;
 }
 
+/* ================= 头部 ================= */
 .se-head {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 14px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, .1);
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, .08);
+    background: rgba(255, 255, 255, .02);
 }
 
 .se-title {
     margin: 0;
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 650;
+    letter-spacing: .3px;
 }
 
 .se-env {
-    padding: 2px 8px;
+    padding: 3px 9px;
     font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .4px;
     border-radius: 999px;
+    white-space: nowrap;
 
     &.is-dev {
         color: #7ee787;
@@ -320,32 +547,42 @@ watch(visible, (v) => {
 
 .se-close {
     margin-left: auto;
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border: 0;
-    border-radius: 8px;
-    background: transparent;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, .06);
     color: rgba(255, 255, 255, .6);
     cursor: pointer;
+    transition: background .18s ease, color .18s ease, transform .18s ease;
 
     &:hover {
-        background: rgba(255, 255, 255, .12);
+        background: rgba(255, 255, 255, .14);
         color: #fff;
+    }
+
+    &:active {
+        transform: scale(.94);
     }
 }
 
+/* ================= 生产环境提示 ================= */
 .se-tip {
-    padding: 20px 18px;
-    line-height: 1.7;
+    padding: 24px 22px;
+    line-height: 1.75;
 
     &__t {
         margin: 0 0 8px;
         font-size: 14px;
+        font-weight: 600;
         color: #ffa657;
     }
 
     &__d {
-        margin: 0 0 14px;
+        margin: 0 0 16px;
         font-size: 13px;
         color: rgba(255, 255, 255, .6);
     }
@@ -356,132 +593,299 @@ watch(visible, (v) => {
     }
 
     code {
-        padding: 1px 5px;
-        border-radius: 4px;
+        padding: 2px 6px;
+        border-radius: 5px;
+        font-size: 12px;
         background: rgba(255, 255, 255, .1);
     }
 }
 
+/* ================= 主体 ================= */
 .se-body {
     display: flex;
-    min-height: 0;
     flex: 1;
+    min-height: 0;
 }
 
+/* ---------- 左侧列表 ---------- */
 .se-list {
-    width: 268px;
-    flex: 0 0 auto;
+    flex: 0 0 340px;
+    width: 340px;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid rgba(255, 255, 255, .1);
+    min-height: 0;
+    border-right: 1px solid rgba(255, 255, 255, .08);
+    background: rgba(255, 255, 255, .015);
 
     &__bar {
+        flex: none;
         display: flex;
-        gap: 6px;
-        padding: 10px;
+        gap: 8px;
+        padding: 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, .06);
+
+        .se-input {
+            flex: 1;
+            min-width: 0;
+        }
     }
 
     &__ul {
         flex: 1;
         margin: 0;
-        padding: 0 6px 8px;
+        padding: 8px;
         list-style: none;
         overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, .18) transparent;
+
+        &::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        &::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, .16);
+            border-radius: 999px;
+        }
+
+        &::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, .3);
+        }
     }
 
     &__li {
         display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 2px 8px;
-        padding: 7px 9px;
-        border-radius: 8px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: auto auto;
+        align-items: center;
+        gap: 3px 10px;
+        padding: 9px 10px 9px 12px;
+        margin-bottom: 2px;
+        border-radius: 10px;
+        border: 1px solid transparent;
         cursor: pointer;
         position: relative;
+        transition: background .16s ease, border-color .16s ease,
+            opacity .2s ease, filter .2s ease;
+
+        &::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            width: 3px;
+            height: 0;
+            background: #8b8bff;
+            border-radius: 0 2px 2px 0;
+            transform: translateY(-50%);
+            transition: height .18s ease;
+        }
 
         &:hover {
-            background: rgba(255, 255, 255, .07);
+            background: rgba(255, 255, 255, .06);
         }
 
         &.is-active {
-            background: rgba(255, 255, 255, .13);
+            background: rgba(139, 139, 255, .14);
+            border-color: rgba(139, 139, 255, .32);
+
+            &::before {
+                height: 60%;
+            }
+
+            .se-list__name {
+                color: #fff;
+            }
+        }
+
+        /* 新增草稿：虚线高亮 */
+        &.is-draft {
+            border-style: dashed;
+            border-color: rgba(126, 231, 135, .45);
+            background: rgba(126, 231, 135, .07);
+
+            &.is-active {
+                background: rgba(126, 231, 135, .13);
+                border-color: rgba(126, 231, 135, .7);
+
+                &::before {
+                    background: #7ee787;
+                }
+            }
+        }
+
+        /* 存在草稿时，其它条目减弱 */
+        &.is-dimmed {
+            opacity: .45;
+            filter: saturate(.6);
+
+            &:hover {
+                opacity: .85;
+                filter: none;
+            }
         }
     }
 
     &__name {
-        font-size: 13px;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13.5px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, .92);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    &__badge {
+        flex: none;
+        padding: 1px 6px;
+        font-size: 10px;
+        font-style: normal;
+        font-weight: 600;
+        color: #7ee787;
+        background: rgba(126, 231, 135, .14);
+        border: 1px solid rgba(126, 231, 135, .35);
+        border-radius: 999px;
     }
 
     &__kind {
         grid-column: 1;
-        font-size: 11px;
-        color: rgba(255, 255, 255, .5);
+        min-width: 0;
+        font-size: 11.5px;
+        color: rgba(255, 255, 255, .45);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 }
 
 .se-del {
+    grid-column: 2;
     grid-row: 1 / span 2;
     align-self: center;
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border: 0;
-    border-radius: 6px;
+    border-radius: 7px;
     background: transparent;
-    color: rgba(255, 255, 255, .45);
+    color: rgba(255, 255, 255, .38);
+    font-size: 15px;
+    line-height: 1;
     cursor: pointer;
+    opacity: 0;
+    transition: opacity .16s ease, color .16s ease, background .16s ease;
 
     &:hover {
         color: #ff6b6b;
-        background: rgba(255, 107, 107, .14);
+        background: rgba(255, 107, 107, .16);
     }
 }
 
-.se-empty {
-    padding: 20px;
-    text-align: center;
-    color: rgba(255, 255, 255, .4);
-    font-size: 12px;
+.se-list__li:hover .se-del,
+.se-list__li.is-active .se-del {
+    opacity: 1;
 }
 
+.se-empty {
+    padding: 28px 20px;
+    text-align: center;
+    color: rgba(255, 255, 255, .35);
+    font-size: 12.5px;
+}
+
+/* ---------- 右侧表单 ---------- */
 .se-form {
     flex: 1;
     min-width: 0;
-    padding: 14px 16px;
+    padding: 18px 20px 24px;
     overflow-y: auto;
+    overscroll-behavior: contain;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 16px;
     align-content: start;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, .18) transparent;
+
+    &::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, .16);
+        border-radius: 999px;
+
+        &:hover {
+            background: rgba(255, 255, 255, .3);
+        }
+    }
 }
 
 .se-f {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 6px;
+    min-width: 0;
     font-size: 12px;
-    color: rgba(255, 255, 255, .6);
+    color: rgba(255, 255, 255, .55);
+
+    >span {
+        padding-left: 2px;
+        font-weight: 500;
+        letter-spacing: .2px;
+    }
 
     &--full {
         grid-column: 1 / -1;
     }
 }
 
+.se-draft-tip {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: 9px 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #7ee787;
+    background: rgba(126, 231, 135, .08);
+    border: 1px dashed rgba(126, 231, 135, .4);
+    border-radius: 9px;
+}
+
 .se-input,
 select.se-input {
     width: 100%;
     box-sizing: border-box;
-    padding: 8px 10px;
+    padding: 9px 11px;
     font-size: 13px;
     font-family: inherit;
     color: rgba(255, 255, 255, .92);
-    background: rgba(255, 255, 255, .05);
-    border: 1px solid rgba(255, 255, 255, .14);
-    border-radius: 8px;
+    background: rgba(255, 255, 255, .045);
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 9px;
     outline: none;
     resize: vertical;
+    transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
+
+    &::placeholder {
+        color: rgba(255, 255, 255, .3);
+    }
+
+    &:hover {
+        border-color: rgba(255, 255, 255, .2);
+    }
 
     &:focus {
-        border-color: rgba(255, 255, 255, .3);
-        background: rgba(255, 255, 255, .09);
+        border-color: rgba(139, 139, 255, .55);
+        background: rgba(255, 255, 255, .08);
+        box-shadow: 0 0 0 3px rgba(139, 139, 255, .14);
     }
 
     option {
@@ -490,17 +894,21 @@ select.se-input {
     }
 }
 
+/* ================= 底部 ================= */
 .se-foot {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 12px 16px;
-    border-top: 1px solid rgba(255, 255, 255, .1);
+    padding: 13px 20px;
+    border-top: 1px solid rgba(255, 255, 255, .08);
+    background: rgba(255, 255, 255, .02);
 }
 
 .se-count {
     font-size: 12px;
-    color: rgba(255, 255, 255, .5);
+    color: rgba(255, 255, 255, .45);
+    font-variant-numeric: tabular-nums;
 }
 
 .se-acts {
@@ -510,33 +918,52 @@ select.se-input {
 }
 
 .se-btn {
-    padding: 7px 14px;
+    padding: 8px 16px;
     font-size: 13px;
     font-family: inherit;
+    line-height: 1;
     cursor: pointer;
-    border-radius: 8px;
+    border-radius: 9px;
     border: 1px solid transparent;
-    transition: .18s;
+    transition: background .18s ease, border-color .18s ease,
+        color .18s ease, transform .12s ease;
+
+    &:active:not(:disabled) {
+        transform: translateY(1px);
+    }
 
     &--sm {
-        padding: 5px 10px;
-        font-size: 12px;
+        padding: 7px 12px;
+        font-size: 12.5px;
+        flex: none;
+        /* 新增按钮：深蓝实底，贴合面板暗色风格 */
+        color: rgba(255, 255, 255, .92);
+        background: rgba(58, 92, 168, .55);
+        border-color: rgba(110, 150, 235, .42);
+
+        &:hover {
+            background: rgba(72, 112, 198, .72);
+            border-color: rgba(130, 170, 245, .6);
+            color: #fff;
+        }
     }
 
     &--ghost {
         color: rgba(255, 255, 255, .85);
-        background: rgba(255, 255, 255, .07);
-        border-color: rgba(255, 255, 255, .16);
+        background: rgba(255, 255, 255, .06);
+        border-color: rgba(255, 255, 255, .14);
 
         &:hover {
-            background: rgba(255, 255, 255, .13);
+            background: rgba(255, 255, 255, .12);
+            border-color: rgba(255, 255, 255, .24);
         }
     }
 
     &--primary {
         color: #0a0a0c;
-        background: rgba(255, 255, 255, .92);
+        background: rgba(255, 255, 255, .94);
         font-weight: 600;
+        box-shadow: 0 4px 14px -6px rgba(255, 255, 255, .5);
 
         &:hover:not(:disabled) {
             background: #fff;
@@ -545,14 +972,37 @@ select.se-input {
         &:disabled {
             opacity: .4;
             cursor: not-allowed;
+            box-shadow: none;
+        }
+    }
+
+    /* 危险操作：红色实底（仅确认按钮使用） */
+    &--danger {
+        color: #fff;
+        font-weight: 600;
+        background: linear-gradient(180deg, #f0575c, #d93a41);
+        border-color: rgba(255, 120, 125, .55);
+        box-shadow: 0 6px 18px -8px rgba(224, 60, 68, .9);
+
+        &:hover {
+            background: linear-gradient(180deg, #ff6b70, #e2454c);
+            border-color: rgba(255, 150, 155, .75);
+        }
+
+        &:focus-visible {
+            outline: none;
+            box-shadow:
+                0 0 0 3px rgba(255, 90, 96, .28),
+                0 6px 18px -8px rgba(224, 60, 68, .9);
         }
     }
 }
 
 .se-msg {
+    flex: none;
     margin: 0;
-    padding: 0 16px 12px;
-    font-size: 12px;
+    padding: 0 20px 14px;
+    font-size: 12.5px;
 
     &.ok {
         color: #7ee787;
@@ -563,13 +1013,151 @@ select.se-input {
     }
 }
 
+/* ================= 删除确认框（中性面板 + 红色提示） ================= */
+.se-confirm {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, .55);
+    backdrop-filter: blur(2px);
+
+    &__box {
+        width: min(360px, 100%);
+        padding: 20px 20px 16px;
+        border-radius: 14px;
+        /* 面板保持中性暗色，与整体风格一致 */
+        background: rgba(30, 30, 34, .99);
+        border: 1px solid rgba(255, 255, 255, .16);
+        box-shadow: 0 24px 60px -16px rgba(0, 0, 0, .8);
+        animation: se-pop .16s ease;
+    }
+
+    /* 标题：红色 */
+    &__t {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 8px;
+        font-size: 14px;
+        font-weight: 650;
+        color: #ff6b70;
+
+        .iconfont {
+            font-size: 15px;
+            color: #ff5a60;
+        }
+    }
+
+    /* 说明文本：淡红 */
+    &__d {
+        margin: 0 0 18px;
+        font-size: 12.5px;
+        line-height: 1.65;
+        color: rgb(238, 226, 226);
+        word-break: break-all;
+    }
+
+    &__ops {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+}
+
+@keyframes se-pop {
+    from {
+        transform: translateY(6px) scale(.98);
+        opacity: 0;
+    }
+
+    to {
+        transform: none;
+        opacity: 1;
+    }
+}
+
+/* ================= 动效 ================= */
 .se-fade-enter-active,
 .se-fade-leave-active {
-    transition: opacity .18s ease;
+    transition: opacity .2s ease;
+
+    .se-panel {
+        transition: transform .2s ease, opacity .2s ease;
+    }
 }
 
 .se-fade-enter-from,
 .se-fade-leave-to {
     opacity: 0;
+
+    .se-panel {
+        transform: translateY(8px) scale(.985);
+        opacity: 0;
+    }
+}
+
+/* ================= 响应式 ================= */
+@media (max-width: 1024px) {
+    .se-panel {
+        width: 96vw;
+        height: 92vh;
+    }
+
+    .se-list {
+        flex: 0 0 290px;
+        width: 290px;
+    }
+}
+
+@media (max-width: 768px) {
+    .se-mask {
+        padding: 0;
+    }
+
+    .se-panel {
+        width: 100vw;
+        height: 100dvh;
+        max-height: none;
+        border-radius: 0;
+        border: none;
+    }
+
+    .se-body {
+        flex-direction: column;
+    }
+
+    .se-list {
+        flex: 0 0 auto;
+        width: 100%;
+        max-height: 42%;
+        border-right: none;
+        border-bottom: 1px solid rgba(255, 255, 255, .08);
+    }
+
+    .se-form {
+        grid-template-columns: minmax(0, 1fr);
+        padding: 16px;
+    }
+
+    .se-f--full {
+        grid-column: auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .se-fade-enter-active,
+    .se-fade-leave-active,
+    .se-fade-enter-from .se-panel,
+    .se-fade-leave-to .se-panel,
+    .se-confirm__box {
+        transition-duration: .01ms !important;
+        animation: none !important;
+    }
 }
 </style>
