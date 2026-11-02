@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { CATEGORIES, type CategoryId, type Site } from '@/types/site';
-import { sites } from '@/config/sites';
+// import { sites } from '@/config/sites';
+import rawSites from '@/config/sites.json';
 import SiteCard from '@/components/CardSite/index.vue';
+import SiteEditor from '@/components/GEditSite/index.vue';
+
+/* JSON 导入的 categoryId 被推断为 string，这里统一收敛为 Site[] */
+const sites = rawSites as unknown as Site[];
+
+const editor = ref(false);
 
 /* ============ ⓪ 星标分组 ============ */
 const PIN_ID = 'pin';
@@ -19,13 +26,6 @@ interface NavGroup {
     items: Site[];
     subGroups: NavSubGroup[];
 }
-
-const pinnedSites = computed<Site[]>(() =>
-    sites
-        .filter((s) => typeof s.pin === 'number' && s.pin > 0)
-        .slice()
-        .sort((a, b) => (b.pin as number) - (a.pin as number) || a.name.localeCompare(b.name)),
-);
 
 /* ============ ① 基础状态 ============ */
 const keyword = ref('');
@@ -108,25 +108,22 @@ const hasFilter = computed(
 );
 
 /* ============ ④ 过滤 ============ */
+const matchKeyword = (s: Site, kw: string) =>
+    !kw ||
+    s.name.toLowerCase().includes(kw) ||
+    s.kind.toLowerCase().includes(kw) ||
+    (s.tags ?? []).some((t) => t.toLowerCase().includes(kw));
+
+const matchTags = (s: Site, tagSet: Set<string>) =>
+    !tagSet.size ||
+    tagSet.has(s.kind) ||
+    (s.tags ?? []).some((t) => tagSet.has(t));
+
 const filtered = computed<Site[]>(() => {
     const kw = debouncedKeyword.value.trim().toLowerCase();
-    let list = sites;
-    if (kw) {
-        list = list.filter(
-            (s) =>
-                s.name.toLowerCase().includes(kw) ||
-                (s.tags ?? []).some((t) => t.toLowerCase().includes(kw)) ||
-                s.kind.toLowerCase().includes(kw),
-        );
-    }
-    if (activeTags.value.length) {
-        list = list.filter(
-            (s) =>
-                activeTags.value.includes(s.kind) ||
-                (s.tags ?? []).some((t) => activeTags.value.includes(t)),
-        );
-    }
-    return list;
+    const tagSet = new Set(activeTags.value);
+
+    return sites.filter((s) => matchKeyword(s, kw) && matchTags(s, tagSet));
 });
 
 const filteredPinned = computed<Site[]>(() =>
@@ -275,6 +272,10 @@ const pickKind = (kind: string) => {
 
 <template>
     <div class="np">
+        <SiteEditor v-model="editor" />
+        <button class="tool" @click="editor = true">
+            <i class="iconfont icon-edit" /> 数据编辑
+        </button>
         <header class="np-header">
             <div class="np-brand">
                 <span class="np-brand__dot" aria-hidden="true" />
@@ -439,8 +440,6 @@ const pickKind = (kind: string) => {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     z-index: 1;
-
-
 }
 
 .np-btn {
@@ -897,7 +896,6 @@ const pickKind = (kind: string) => {
     background: rgba(28, 28, 32, 0.45);
     border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 11px;
-
 }
 
 .np-kind {

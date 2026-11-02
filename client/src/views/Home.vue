@@ -393,7 +393,7 @@ function toggleFlip() {
 /* ===== 搜索容器 ===== */
 .card__search {
     width: 80%;
-    margin: 10px auto 50px;
+    margin: 10px auto 60px;
 }
 
 /* ===== 标签 ===== */

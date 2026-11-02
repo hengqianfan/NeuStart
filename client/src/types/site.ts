@@ -9,17 +9,13 @@ export const CATEGORIES = [
     { id: '007', name: '编辑阅读' },
     { id: '008', name: '生活娱乐' },
     { id: '009', name: '论坛资讯' },
-    { id: '010', name: '图片绘画' }
-
-
-
+    { id: '010', name: '图片绘画' },
 ] as const;
 
 export type CategoryId = (typeof CATEGORIES)[number]['id'];
 
 /**
  * 二级分类（kind）字典
- * 注意：kind 全局唯一命名，若不同一级分类存在同名二级分类，请加前缀
  */
 export const KINDS = {
     '001': ['代码托管', '技术文档', '开源项目', '设计资源'],
@@ -27,11 +23,20 @@ export const KINDS = {
     '003': ['综合类', '短视频', '音乐', '直播平台', '视频剪辑', '影视资源', '动漫'],
     '004': ['游戏平台', '游戏官网', '游戏社区', '交易平台', '游戏资源', '游戏工具'],
     '005': ['个人博客', '资源博客'],
-    '006': ['搜索工具', '网络工具', '网盘存储', '设计工具', '办公工具', '开发工具', '效率工具', '安全工具'],
+    '006': [
+        '搜索工具',
+        '网络工具',
+        '网盘存储',
+        '设计工具',
+        '办公工具',
+        '开发工具',
+        '效率工具',
+        '安全工具',
+    ],
     '007': ['文档软件', '小说平台'],
     '008': ['购物网站', '旅游出行', '美食餐饮', '运动健身'],
     '009': ['知名主流', '新闻资讯', '专业门类'],
-    '010': ['综合图片', '壁纸']
+    '010': ['综合图片', '壁纸'],
 } as const satisfies Record<CategoryId, readonly string[]>;
 
 export type KindId = (typeof KINDS)[CategoryId][number];
@@ -46,5 +51,16 @@ export interface Site {
     tags: string[];
     link?: string;
     icon?: string;
-    pin?: number
+    pin?: number;
+}
+
+/** 分类 id -> 分类名 */
+export const CATEGORY_MAP = Object.fromEntries(
+    CATEGORIES.map((c) => [c.id, c.name]),
+) as Record<CategoryId, string>;
+
+/** 判断某 kind 是否属于某分类 */
+export function isKindOf(categoryId: CategoryId, kind: string): boolean {
+    const kinds: readonly string[] = KINDS[categoryId] ?? [];
+    return kinds.includes(kind);
 }

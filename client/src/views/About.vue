@@ -73,7 +73,7 @@
 
 <script lang="ts" setup>
 const timeline = [
-    { date: '2026-11-02', title: '站点部署', text: '项目基本功能已实现，部署到 GitHub Pages' },
+    { date: '2026-11-02', title: '站点部署', text: 'NeuStart 项目预设的所有模块功能已基本实现，同步部署到 GitHub Pages' },
 
     { date: '2026-10-30', title: '站点初建', text: '参考原博客项目 Hone 的样式分离重建本站 NeuStart' },
 

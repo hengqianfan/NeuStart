@@ -55,25 +55,8 @@
 
 <script lang="ts" setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-
-interface SearchEngine {
-    key: string
-    label: string
-    icon: string
-    /** 关键词占位符 */
-    url: string
-    /** 是否新标签打开 */
-    blank?: boolean
-}
-
-const engines: [SearchEngine, ...SearchEngine[]] = [
-    { key: 'bing', label: '必应', icon: 'bing', url: 'https://www.bing.com/search?q=%s', blank: true },
-    { key: 'google', label: 'Google', icon: 'google', url: 'https://www.google.com/search?q=%s', blank: true },
-    { key: 'bilibili', label: '哔哩哔哩', icon: 'bilibili', url: 'https://search.bilibili.com/all?keyword=%s', blank: true },
-    { key: 'baidu', label: '百度', icon: 'baidu', url: 'https://www.baidu.com/s?wd=%s', blank: true },
-    { key: 'github', label: 'GitHub', icon: 'github', url: 'https://github.com/search?q=%s', blank: true },
-    { key: 'zhihu', label: '知乎', icon: 'zhihu', url: 'https://www.zhihu.com/search?type=content&q=%s', blank: true },
-]
+import { engines } from '@/config/searchEngine'
+import type { SearchEngine } from '@/types/engine'
 
 const STORAGE_KEY = 'profile.search.engine'
 
@@ -257,15 +240,21 @@ watch(activeKey, persist)
             transparent);
 }
 
-/* 下拉面板 */
+/* 下拉面板：固定最大高度 + 内部滚动 */
 .engine__menu {
     position: absolute;
     top: calc(100% + 10px);
     left: -6px;
     z-index: 20;
     min-width: 168px;
+    max-height: 240px;
+    /* 固定最大高度 */
     margin: 0;
     padding: 6px;
+    overflow-y: auto;
+    /* 超出可滚动 */
+    overscroll-behavior: contain;
+    /* 阻止滚动穿透到页面 */
     list-style: none;
     background: rgba(14, 14, 16, 0.94);
     -webkit-backdrop-filter: blur(18px) saturate(140%);
@@ -275,9 +264,30 @@ watch(activeKey, persist)
     box-shadow:
         0 20px 44px rgba(0, 0, 0, 0.7),
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    scrollbar-width: thin;
+    /* Firefox */
+    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+
+    /* WebKit 细滚动条 */
+    &::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    &::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.22);
+        border-radius: 999px;
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.34);
+        }
+    }
 }
 
-/* 小尖角 */
+/* 小尖角：固定在面板顶部，不随列表滚动 */
 .engine__menu::before {
     content: '';
     position: absolute;
@@ -473,6 +483,8 @@ watch(activeKey, persist)
 
     .engine__menu {
         min-width: 150px;
+        max-height: 180px;
+        /* 小屏进一步压低，避免溢出视口 */
     }
 }
 
